@@ -1,0 +1,489 @@
+<html><head></head><body><div class="apidocDiv">
+<style>
+/*csslint
+*/
+.apidocDiv {
+    background: #fff;
+    font-family: Arial, Helvetica, sans-serif;
+}
+.apidocDiv a[href] {
+    color: #33f;
+    font-weight: bold;
+    text-decoration: none;
+}
+.apidocDiv a[href]:hover {
+    text-decoration: underline;
+}
+.apidocCodeCommentSpan {
+    background: #bbf;
+    color: #000;
+    display: block;
+}
+.apidocCodeKeywordSpan {
+    color: #d00;
+    font-weight: bold;
+}
+.apidocCodePre {
+    background: #eef;
+    border: 1px solid;
+    color: #777;
+    padding: 5px;
+    white-space: pre-wrap;
+}
+.apidocFooterDiv {
+    margin-top: 20px;
+    text-align: center;
+}
+.apidocModuleLi {
+    margin-top: 10px;
+}
+.apidocSectionDiv {
+    border-top: 1px solid;
+    margin-top: 20px;
+}
+.apidocSignatureSpan {
+    color: #777;
+    font-weight: bold;
+}
+</style>
+<h1>api documentation for
+    <a href="http://github.com/cloudant/nodejs-cloudant">cloudant (v1.7.1)</a>
+</h1>
+<h4>Cloudant Node.js client</h4>
+<div class="apidocSectionDiv"><a href="#apidoc.tableOfContents" id="apidoc.tableOfContents"><h1>table of contents</h1></a><ol>
+
+    <li class="apidocModuleLi"><a href="#apidoc.module.cloudant">module cloudant</a><ol>
+
+        <li>
+
+            <a class="apidocElementLiA" href="#apidoc.element.cloudant.cloudant">
+            function <span class="apidocSignatureSpan"></span>cloudant
+            <span class="apidocSignatureSpan">(options, callback)</span>
+            </a>
+
+        </li>
+
+        <li>
+
+            <a class="apidocElementLiA" href="#apidoc.element.cloudant.reconfigure">
+            function <span class="apidocSignatureSpan">cloudant.</span>reconfigure
+            <span class="apidocSignatureSpan">(config)</span>
+            </a>
+
+        </li>
+
+    </ol></li>
+
+    <li class="apidocModuleLi"><a href="#apidoc.module.cloudant.reconfigure">module cloudant.reconfigure</a><ol>
+
+        <li>
+
+            <a class="apidocElementLiA" href="#apidoc.element.cloudant.reconfigure.reconfigure">
+            function <span class="apidocSignatureSpan">cloudant.</span>reconfigure
+            <span class="apidocSignatureSpan">(config)</span>
+            </a>
+
+        </li>
+
+        <li>
+
+            <a class="apidocElementLiA" href="#apidoc.element.cloudant.reconfigure.getOptions">
+            function <span class="apidocSignatureSpan">cloudant.reconfigure.</span>getOptions
+            <span class="apidocSignatureSpan">(config)</span>
+            </a>
+
+        </li>
+
+    </ol></li>
+
+</ol></div>
+
+<div class="apidocSectionDiv">
+<h1><a href="#apidoc.module.cloudant" id="apidoc.module.cloudant">module cloudant</a></h1>
+
+
+    <h2>
+        <a href="#apidoc.element.cloudant.cloudant" id="apidoc.element.cloudant.cloudant">
+        function <span class="apidocSignatureSpan"></span>cloudant
+        <span class="apidocSignatureSpan">(options, callback)</span>
+        </a>
+    </h2>
+    <ul>
+    <li>description and source-code<pre class="apidocCodePre">function Cloudant(options, callback) {
+  debug('Initialize', options);
+
+  // Save the username and password for potential conversion to cookie auth.
+  var login = reconfigure.getOptions(options);
+
+  // Convert the credentials into a URL that will work for cloudant. The
+  // credentials object will become squashed into a string, which is fine
+  // except for the .cookie option.
+  var cookie = options.cookie;
+
+  var pkg = require('./package.json');
+  var useragent = "nodejs-cloudant/" + pkg.version + " (Node.js " + process.version + ")";
+  var requestDefaults = { headers: { "User-agent": useragent}, gzip:true  };
+  var theurl = null;
+  if (typeof options == "object") {
+    if (options.requestDefaults) {
+      requestDefaults = options.requestDefaults;
+    }
+    theurl = reconfigure(options);
+  } else {
+    theurl = reconfigure({ url: options})
+  }
+  if (theurl === null) {
+    if (callback) {
+      return callback('invalid url', null);
+    } else {
+      throw(new Error('invalid url'));
+    }
+  }
+
+  // keep connections alive by default
+  if (requestDefaults &amp;&amp; !requestDefaults.agent) {
+    var protocol = (theurl.match(/^https/))? require('https') : require('http');
+    var agent = new protocol.Agent({ keepAlive:true });
+    requestDefaults.agent = agent;
+  }
+
+  // plugin a request library
+  var plugin = null;
+  if (options.plugin) {
+    options.requestDefaults = requestDefaults;
+    if(typeof options.plugin === 'string') {
+      var plugintype = options.plugin || 'default';
+      debug('Using the "' + plugintype + '" plugin');
+      plugin =  require('./plugins/' + plugintype)(options);
+    } else if (typeof options.plugin === 'function') {
+      debug('Using a custom plugin');
+      plugin = options.plugin;
+    }
+  }
+
+  debug('Create underlying Nano instance, options=%j requestDefaults=%j', options, requestDefaults);
+  var nano = Nano({url:theurl, request: plugin, requestDefaults: requestDefaults, cookie: cookie, log: nanodebug});
+
+  // our own implementation of 'use' e.g. nano.use or nano.db.use
+  // it includes all db-level functions
+  var use = function(db) {
+
+    // ****************
+    // Functions added to each db e.g. cloudant.use("mydb")
+    // ****************
+
+    var bulk_get = function(options, callback) {
+      return nano.request( { path: encodeURIComponent(db) + "/_bulk_get",
+                             method: "post",
+                             body: options }, callback)
+    };
+
+    // https://docs.cloudant.com/geo.html
+    var geo = function(docName, indexName, query, callback) {
+      var path = encodeURIComponent(db) + "/_design/" +
+                 encodeURIComponent(docName) + "/_geo/" +
+                 encodeURIComponent(indexName);
+      return nano.request({path:path, qs:query}, callback);
+    };
+
+    // https://docs.cloudant.com/api.html#viewing-permissions
+    var get_security = function(callback) {
+      var path = "_api/v2/db/" + encodeURIComponent(db) + "/_security";
+      return nano.request( { path: path}, callback);
+    };
+
+    // https://docs.cloudant.com/api.html#modifying-permissions
+    var set_security = function(permissions, callback) {
+      var path = "_api/v2/db/" + encodeURIComponent(db) + "/_security";
+      return nano.request( { path: path,
+                             method: "put",
+                             body: {cloudant: permissions} }, callback);
+    };
+
+    // https://docs.cloudant.com/api.html#list-all-indexes &amp;
+    // https://docs.cloudant.com/api.html#creating-a-new-index
+    var index = function(definition, callback) {
+
+      // if no definition is provided, then the user wants see all the indexes
+      if (typeof definition == "function") {
+        callback = definition;
+        nano.request({ path: encodeURIComponent(db) + "/_index" }, callback);
+      } else {
+        // the user wants to create a new index
+        return nano.request({ path: encodeURIComponent(db) + "/_index",
+                              method:"post",
+                              body: definition}, callback);
+      }
+    };
+
+    // https://docs.cloudant.com/api.html#deleting-an-index ...</pre></li>
+    <li>example usage<pre class="apidocCodePre">n/a</pre></li>
+    </ul>
+
+
+
+    <h2>
+        <a href="#apidoc.element.cloudant.reconfigure" id="apidoc.element.cloudant.reconfigure">
+        function <span class="apidocSignatureSpan">cloudant.</span>reconfigure
+        <span class="apidocSignatureSpan">(config)</span>
+        </a>
+    </h2>
+    <ul>
+    <li>description and source-code<pre class="apidocCodePre">reconfigure = function (config) {
+  config = JSON.parse(JSON.stringify(config)); //clone
+
+  var outUrl;
+  // if a full URL is passed in
+  if (config.url) {
+    // parse the URL
+    var parsed = null;
+    try {
+      var parsed = url.parse(config.url);
+    } catch(e) {
+      parsed = null;
+    };
+    if (!config.url || !parsed || !parsed.hostname || !parsed.protocol || !parsed.slashes) {
+      return null;
+    }
+
+
+    // enforce HTTPS for *cloudant.com domains
+    if (parsed.hostname.match(/cloudant\.com$/) &amp;&amp; parsed.protocol == "http:") {
+
+      console.warn("WARNING: You are sending your password as plaintext over the HTTP; switching to HTTPS");
+
+      // force HTTPS
+      parsed.protocol = 'https:';
+
+      // remove port number and path
+      parsed.host = parsed.host.replace(/:[0-9]*$/,'');
+      delete parsed.port;
+      delete parsed.pathname;
+      delete parsed.path;
+
+      // reconstruct the URL
+      config.url = url.format(parsed);
+    }
+
+    outUrl = config.url;
+
+  } else if (config.vcapServices) {
+    cloudantServices = config.vcapServices.cloudantNoSQLDB;
+
+    if (!cloudantServices || cloudantServices.length == 0) {
+      throw new Error('Missing Cloudant service in vcapServices');
+    }
+
+    for (var i = 0; i &lt; cloudantServices.length; i++) {
+      if (config.instanceName == undefined || cloudantServices[i].name == config.instanceName) {
+        var credentials = cloudantServices[i].credentials;
+        if (credentials &amp;&amp; credentials.url) {
+          outUrl = credentials.url;
+          break;
+        } else {
+          throw new Error('Invalid Cloudant service in vcapServices');
+        }
+      }
+    }
+
+    if (!outUrl) {
+      throw new Error('Missing Cloudant service in vcapServices');
+    }
+
+  } else {
+    // An account can be just the username, or the full cloudant URL.
+    var match = config.account &amp;&amp;
+                config.account.match &amp;&amp;
+                config.account.match(/([^.]+)\.cloudant\.com/);
+    if (match)
+      config.account = match[1];
+
+    var options = getOptions(config);
+    var username = options.username;
+    var password = options.password;
+
+    // Configure for Cloudant, either authenticated or anonymous.
+    if (config.account &amp;&amp; password) {
+      config.url = 'https://' + encodeURIComponent(username) + ':' +
+                    encodeURIComponent(password) + '@' +
+                    encodeURIComponent(config.account) + '.cloudant.com';
+    }
+    else if (config.account) {
+      config.url = 'https://' + encodeURIComponent(config.account) +
+                   '.cloudant.com';
+    }
+
+    outUrl = config.url;
+  }
+
+  // We trim out the trailing `/` because when the URL tracks down to `nano` we have to
+  // worry that the trailing `/` doubles up depending on how URLs are built, this creates
+  // "Database does not exist." errors.
+  // Issue: cloudant/nodejs-cloudant#129
+  if (outUrl &amp;&amp; outUrl.slice(-1) == '/') {
+    outUrl = outUrl.slice(0, -1);
+  }
+
+  return (outUrl || null);
+}</pre></li>
+    <li>example usage<pre class="apidocCodePre">n/a</pre></li>
+    </ul>
+
+
+</div>
+
+<div class="apidocSectionDiv">
+<h1><a href="#apidoc.module.cloudant.reconfigure" id="apidoc.module.cloudant.reconfigure">module cloudant.reconfigure</a></h1>
+
+
+    <h2>
+        <a href="#apidoc.element.cloudant.reconfigure.reconfigure" id="apidoc.element.cloudant.reconfigure.reconfigure">
+        function <span class="apidocSignatureSpan">cloudant.</span>reconfigure
+        <span class="apidocSignatureSpan">(config)</span>
+        </a>
+    </h2>
+    <ul>
+    <li>description and source-code<pre class="apidocCodePre">reconfigure = function (config) {
+  config = JSON.parse(JSON.stringify(config)); //clone
+
+  var outUrl;
+  // if a full URL is passed in
+  if (config.url) {
+    // parse the URL
+    var parsed = null;
+    try {
+      var parsed = url.parse(config.url);
+    } catch(e) {
+      parsed = null;
+    };
+    if (!config.url || !parsed || !parsed.hostname || !parsed.protocol || !parsed.slashes) {
+      return null;
+    }
+
+
+    // enforce HTTPS for *cloudant.com domains
+    if (parsed.hostname.match(/cloudant\.com$/) &amp;&amp; parsed.protocol == "http:") {
+
+      console.warn("WARNING: You are sending your password as plaintext over the HTTP; switching to HTTPS");
+
+      // force HTTPS
+      parsed.protocol = 'https:';
+
+      // remove port number and path
+      parsed.host = parsed.host.replace(/:[0-9]*$/,'');
+      delete parsed.port;
+      delete parsed.pathname;
+      delete parsed.path;
+
+      // reconstruct the URL
+      config.url = url.format(parsed);
+    }
+
+    outUrl = config.url;
+
+  } else if (config.vcapServices) {
+    cloudantServices = config.vcapServices.cloudantNoSQLDB;
+
+    if (!cloudantServices || cloudantServices.length == 0) {
+      throw new Error('Missing Cloudant service in vcapServices');
+    }
+
+    for (var i = 0; i &lt; cloudantServices.length; i++) {
+      if (config.instanceName == undefined || cloudantServices[i].name == config.instanceName) {
+        var credentials = cloudantServices[i].credentials;
+        if (credentials &amp;&amp; credentials.url) {
+          outUrl = credentials.url;
+          break;
+        } else {
+          throw new Error('Invalid Cloudant service in vcapServices');
+        }
+      }
+    }
+
+    if (!outUrl) {
+      throw new Error('Missing Cloudant service in vcapServices');
+    }
+
+  } else {
+    // An account can be just the username, or the full cloudant URL.
+    var match = config.account &amp;&amp;
+                config.account.match &amp;&amp;
+                config.account.match(/([^.]+)\.cloudant\.com/);
+    if (match)
+      config.account = match[1];
+
+    var options = getOptions(config);
+    var username = options.username;
+    var password = options.password;
+
+    // Configure for Cloudant, either authenticated or anonymous.
+    if (config.account &amp;&amp; password) {
+      config.url = 'https://' + encodeURIComponent(username) + ':' +
+                    encodeURIComponent(password) + '@' +
+                    encodeURIComponent(config.account) + '.cloudant.com';
+    }
+    else if (config.account) {
+      config.url = 'https://' + encodeURIComponent(config.account) +
+                   '.cloudant.com';
+    }
+
+    outUrl = config.url;
+  }
+
+  // We trim out the trailing `/` because when the URL tracks down to `nano` we have to
+  // worry that the trailing `/` doubles up depending on how URLs are built, this creates
+  // "Database does not exist." errors.
+  // Issue: cloudant/nodejs-cloudant#129
+  if (outUrl &amp;&amp; outUrl.slice(-1) == '/') {
+    outUrl = outUrl.slice(0, -1);
+  }
+
+  return (outUrl || null);
+}</pre></li>
+    <li>example usage<pre class="apidocCodePre">n/a</pre></li>
+    </ul>
+
+
+
+    <h2>
+        <a href="#apidoc.element.cloudant.reconfigure.getOptions" id="apidoc.element.cloudant.reconfigure.getOptions">
+        function <span class="apidocSignatureSpan">cloudant.reconfigure.</span>getOptions
+        <span class="apidocSignatureSpan">(config)</span>
+        </a>
+    </h2>
+    <ul>
+    <li>description and source-code<pre class="apidocCodePre">function getOptions(config) {
+  // The username is the account ("foo" for "foo.cloudant.com")
+  // or the third-party API key.
+  var result = {password:config.password, username: config.key || config.username || config.account};
+  return result;
+}</pre></li>
+    <li>example usage<pre class="apidocCodePre">...
+var reconfigure = require('./lib/reconfigure.js')
+
+// This IS the Cloudant API. It is mostly nano, with a few functions.
+function Cloudant(options, callback) {
+debug('Initialize', options);
+
+// Save the username and password for potential conversion to cookie auth.
+var login = reconfigure.<span class="apidocCodeKeywordSpan">getOptions</span>(options);
+
+// Convert the credentials into a URL that will work for cloudant. The
+// credentials object will become squashed into a string, which is fine
+// except for the .cookie option.
+var cookie = options.cookie;
+
+var pkg = require('./package.json');
+...</pre></li>
+    </ul>
+
+
+</div>
+
+<div class="apidocFooterDiv">
+    [ this document was created with
+    <a href="https://github.com/kaizhu256/node-utility2" target="_blank">utility2</a>
+    ]
+</div>
+</div>
+</body></html>
